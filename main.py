@@ -50,7 +50,7 @@ def get_session_history_from_postgres(session_id: str):
 #langchain中所有消息类型：SystemMessage, HumanMessage, AIMessage, ToolMessage
 
 #创建带历史记录的处理链
-
+#√已完成:切分聊天上下文，形成摘要记忆以节省token
 chain_with_message_history = RunnableWithMessageHistory(
     chain,
     get_session_history= get_session_history_from_postgres,
@@ -58,12 +58,52 @@ chain_with_message_history = RunnableWithMessageHistory(
     history_messages_key="chat_history",
 )
 
+#剪辑和摘要上下文历史记录：最近前k条数据，把之前的消息形成摘要
+def summarize_messages(current_input, k: int =2):
+    """剪辑和摘要上下文，历史记录"""
+    session_id = current_input['config']['configurable']['session_id']
+    if not session_id:
+        raise ValueError("必须通过config参数提供session_id")
+    
+    #获取当前会话id的历史聊天记录
+    chat_history = get_session_history_from_postgres(session_id)#返回的类型是：PostgresChatMessageHistory对象
+    stored_messages = chat_history.messages#通过history对象调取messages
+    if len(stored_messages)<=k:#保留最近k条历史记录
+        return False
+    
+    #剪辑消息列表
+    last_k_messages = stored_messages[-k:]#保留的k条消息
+    messages_to_summarize = stored_messages[:-k]#需要总结的消息
+
+    summarization_prompt = ChatPromptTemplate.from_messages([
+        ("system", "请将下列历史对话压缩为一条保留关键消息的摘要信息，不丢失信息密度"),
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("human","请生成包含上述对话核心内容的摘要，保留重要事实和决策。")
+    ])
+    summarization_chain = summarization_prompt | llm
+    #生成摘要
+    summary_message = summarization_chain.invoke({"chat_history": messages_to_summarize})
+
+    #重建历史记录：摘要+最后k条消息
+    #FIXME：能否不影响数据库中存储的历史记录？
+    chat_history.clear()
+    chat_history.add_message(summary_message)
+    for msg in last_k_messages:
+        chat_history.add_message(msg)
+    return True
+
+#最终的链,使用RunnablePassthrough方法，默认将输入数据原样传递到下游，而.assign()方法允许在保留原始输入的同时，通过指定键对（message_summarized=summarization）将Dict中新加一个字段
+from langchain_core.runnables import RunnablePassthrough
+final_chain = RunnablePassthrough.assign(messages_summaried = summarize_messages) | chain_with_message_history
+
 #配置文件，使大模型识别会话id
 session_id = "KIAEr_1"
 config = {"configurable": {"session_id": session_id}}
 
-result1 = chain_with_message_history.invoke({"input":"你好，我的名字叫张文凯"}, config=config)
-print(result1)
+# result1 = final_chain.invoke({"input":"你好，我的名字叫张文凯", "config":config}, config=config)
+# print(result1)
 
-result2 = chain_with_message_history.invoke({"input":"那你的呢？"}, config=config)
-print(result2)
+# result2 = final_chain.invoke({"input":"那你的呢？", "config":config}, config=config)
+# print(result2)
+result3 = final_chain.invoke({"input":"请你以我的口吻给未来的师弟介绍一下这个岗位的消息。", "config":config}, config=config)
+print(result3)
