@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     unsplash_access_key: str = ""
     unsplash_secret_key: str = ""
 
+    #智谱配置
+    zai_api_key : str = ""
+
+    #千问配置
+    dashscope_api_key : str = ""
+    dashscope_base_url : str = ""
+    dashscope_model : str = ""
+
     # LLM配置 (从环境变量读取,由HelloAgents管理)
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"

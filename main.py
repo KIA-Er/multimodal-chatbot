@@ -6,7 +6,6 @@ from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories.postgres import PostgresChatMessageHistory
 from config import get_settings
-import gradio as gr
 
 setting = get_settings()
 
@@ -45,6 +44,7 @@ setting.postgres_port,
 setting.postgres_mydatabase,
 )
 def get_session_history_from_postgres(session_id: str):
+    # print(f"🧾 正在加载历史记录，session_id = {session_id}")
     return PostgresChatMessageHistory(
         session_id=session_id,
         connection_string=DB_URI
@@ -76,6 +76,7 @@ def summarize_messages(current_input, k: int =2):
     #获取当前会话id的历史聊天记录
     chat_history = get_session_history_from_postgres(session_id)#返回的类型是：PostgresChatMessageHistory对象
     stored_messages = chat_history.messages#通过history对象调取messages
+    print(f"🧾 正在加载历史记录，内容为：{stored_messages}")
     if len(stored_messages)<=k:#保留最近k条历史记录
         return {
         "original_messages": stored_messages,
@@ -112,7 +113,6 @@ def summarize_messages(current_input, k: int =2):
 
 #最终的链,使用RunnablePassthrough方法，默认将输入数据原样传递到下游，而.assign()方法允许在保留原始输入的同时，通过指定键对（message_summarized=summarization）将Dict中新加一个键值对
 from langchain_core.runnables import RunnablePassthrough
-
 final_chain = (RunnablePassthrough.assign(messages_summaried=summarize_messages)
                | RunnablePassthrough.assign(
             input=lambda x: x['input'],
@@ -126,43 +126,11 @@ final_chain = (RunnablePassthrough.assign(messages_summaried=summarize_messages)
 session_id = "KKZ"
 config = {"configurable": {"session_id": session_id}}
 
-# result3 = final_chain.invoke({"input":"用我的名字写一篇短文。", "config":config}, config=config)
+def get_final_chain():
+    return final_chain
+def get_config(session_id: str = "KKZ"):
+    return {"configurable": {"session_id": session_id}}
+# result3 = final_chain.invoke({"input":"我的名字叫什么？", "config":config}, config=config)
 # print(result3)
 
 
-'''使用Gradio库创建一个简单的Web界面，允许用户通过文本和语音与聊天机器人进行交互。'''
-# TODO: 优化界面，将语音输入与文字输入结合起来
-# TODO: 实现用户登录功能，为每一个用户赋予一个session_id，以便保存和区分不同用户的聊天记录
-# TODO：每次用户登录时，将历史记录加载到界面中显示出来
-#web界面中的核心函数
-def chat_with_bot(chat_history, user_message):
-    if user_message:
-        chat_history.append({'role': "user", 'content': user_message})#字典内的role对应的值必须是"user"或者"assistant"
-    return chat_history, ''
-
-def execute_chain(chat_history):
-    input = chat_history[-1]
-    result = final_chain.invoke({"input":input, "config":config}, config=config)
-
-    chat_history.append({'role': 'assistant', 'content': result.content})
-    return chat_history
-
-with gr.Blocks(title="多模态聊天机器人", theme = gr.themes.Soft()) as block:
-
-    #聊天历史记录的组件
-    chatbot = gr.Chatbot(type="messages", height=500, label = "聊天机器人")
-
-    with gr.Row():
-        #文字输入的区域
-        with gr.Column(scale=4):
-            user_input = gr.Textbox(placeholder="请给ChatBot发送消息...", label="文字输入", max_lines=5)
-
-            submit_btn = gr.Button("发送",variant="primary")
-
-        with gr.Column(scale=1):
-            audio_input = gr.Audio(sources="microphone", type="filepath", label="语音输入", format="wav")
-
-    chat_msg = user_input.submit(chat_with_bot, [chatbot, user_input], [chatbot, user_input])
-    chat_msg.then(execute_chain,chatbot,chatbot)
-if __name__ == "__main__":
-    block.launch()
